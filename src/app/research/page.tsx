@@ -1,15 +1,31 @@
-'use client';
+"use client";
 
-import { useState, useEffect, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
-import AppShell from '@/components/AppShell';
-import Icon from '@/components/Icon';
-import type { ResearchFact, Controversy, ExperienceSuggestion } from '@/lib/types';
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
+import AppShell from "@/components/AppShell";
+import Icon from "@/components/Icon";
+import {
+  saveResearch,
+  getResearchByTopicId,
+  getTopicById,
+  getUserProfile,
+  updateTopicStatus,
+  generateId,
+} from "@/lib/store";
+import type {
+  ResearchFact,
+  Controversy,
+  ExperienceSuggestion,
+  SEOStrategy,
+  Research,
+} from "@/lib/types";
 
 function ResearchContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
-  const initialTopic = searchParams.get('topic') || '';
-  const initialKeyword = searchParams.get('keyword') || '';
+  const topicId = searchParams.get("topicId") || "";
+  const initialTopic = searchParams.get("topic") || "";
+  const initialKeyword = searchParams.get("keyword") || "";
 
   const [topic, setTopic] = useState(initialTopic);
   const [keyword, setKeyword] = useState(initialKeyword);
@@ -18,19 +34,39 @@ function ResearchContent() {
   const [facts, setFacts] = useState<ResearchFact[]>([]);
   const [controversies, setControversies] = useState<Controversy[]>([]);
   const [experienceSuggestions, setExperienceSuggestions] = useState<ExperienceSuggestion[]>([]);
+  const [seoStrategy, setSeoStrategy] = useState<SEOStrategy | null>(null);
+  const [writingGuide, setWritingGuide] = useState("");
+  const [researchId, setResearchId] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
 
-  // Sync from URL params when they change
   useEffect(() => {
-    if (searchParams.get('topic')) setTopic(searchParams.get('topic')!);
-    if (searchParams.get('keyword')) setKeyword(searchParams.get('keyword')!);
-  }, [searchParams]);
+    if (topicId) {
+      const t = getTopicById(topicId);
+      if (t) {
+        setTopic(t.title);
+        setKeyword(t.keyword);
+      }
+      // 기존 리서치 로드
+      const existing = getResearchByTopicId(topicId);
+      if (existing) {
+        setFacts(existing.facts);
+        setControversies(existing.controversies);
+        setExperienceSuggestions(existing.experience_suggestions);
+        setSeoStrategy(existing.seoStrategy || null);
+        setWritingGuide(existing.writingGuide || "");
+        setResearchId(existing.id);
+        setProgress(100);
+        if (existing.status === "confirmed") setConfirmed(true);
+      }
+    }
+  }, [topicId]);
 
   const toggleFactState = (id: string) => {
     setFacts((prev) =>
       prev.map((f) => {
         if (f.id !== id) return f;
-        // cycle: null -> true -> false -> null
-        const next = f.verified === null ? true : f.verified === true ? false : null;
+        const next =
+          f.verified === null ? true : f.verified === true ? false : null;
         return { ...f, verified: next };
       })
     );
@@ -43,31 +79,66 @@ function ResearchContent() {
     setFacts([]);
     setControversies([]);
     setExperienceSuggestions([]);
+    setSeoStrategy(null);
+    setWritingGuide("");
+    setConfirmed(false);
 
-    // Animate progress bar
     const interval = setInterval(() => {
       setProgress((prev) => {
         if (prev >= 90) return prev;
-        return prev + Math.random() * 12;
+        return prev + Math.random() * 8;
       });
-    }, 400);
+    }, 500);
 
     try {
-      const res = await fetch('/api/research', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic, keyword }),
+      const profile = getUserProfile();
+      const storedTopic = topicId ? getTopicById(topicId) : null;
+
+      // 사용자가 수정한 입력값을 우선 사용
+      const topicPayload = {
+        ...(storedTopic || {}),
+        title: topic,
+        keyword,
+        targetPersona: storedTopic?.targetPersona || "",
+      };
+
+      const res = await fetch("/api/research", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topic: topicPayload,
+          profile,
+        }),
       });
 
-      if (!res.ok) throw new Error('API error');
+      if (!res.ok) throw new Error("API error");
 
       const data = await res.json();
       setFacts(data.facts || []);
       setControversies(data.controversies || []);
       setExperienceSuggestions(data.experienceSuggestions || []);
+      setSeoStrategy(data.seoStrategy || null);
+      setWritingGuide(data.writingGuide || "");
       setProgress(100);
+
+      const newId = `research_${generateId()}`;
+      setResearchId(newId);
+
+      saveResearch({
+        id: newId,
+        topicId: topicId || topic,
+        facts: data.facts || [],
+        controversies: data.controversies || [],
+        experience_suggestions: data.experienceSuggestions || [],
+        seoStrategy: data.seoStrategy || undefined,
+        writingGuide: data.writingGuide || "",
+        progress: 100,
+        status: "pending-confirmation",
+        created_at: new Date().toISOString(),
+      });
+
+      if (topicId) updateTopicStatus(topicId, "researched");
     } catch {
-      // keep empty state on error
       setProgress(0);
     } finally {
       clearInterval(interval);
@@ -75,13 +146,34 @@ function ResearchContent() {
     }
   };
 
-  const factIcon = (verified: boolean | null) => {
-    if (verified === true) return { icon: 'check_circle', color: 'text-green-600' };
-    if (verified === false) return { icon: 'cancel', color: 'text-red-500' };
-    return { icon: 'help', color: 'text-on-surface-variant' };
+  const handleConfirm = () => {
+    if (!researchId) return;
+    const existing = getResearchByTopicId(topicId || topic);
+    if (existing) {
+      const updated: Research = { ...existing, status: "confirmed" };
+      saveResearch(updated);
+    }
+    setConfirmed(true);
   };
 
-  const hasResults = facts.length > 0 || controversies.length > 0 || experienceSuggestions.length > 0;
+  const handleProceedToWrite = () => {
+    if (topicId) {
+      router.push(`/write?topicId=${encodeURIComponent(topicId)}`);
+    }
+  };
+
+  const factIcon = (verified: boolean | null) => {
+    if (verified === true)
+      return { icon: "check_circle", color: "text-green-600" };
+    if (verified === false)
+      return { icon: "cancel", color: "text-red-500" };
+    return { icon: "help", color: "text-on-surface-variant" };
+  };
+
+  const hasResults =
+    facts.length > 0 ||
+    controversies.length > 0 ||
+    experienceSuggestions.length > 0;
 
   return (
     <div className="max-w-5xl mx-auto space-y-8">
@@ -93,7 +185,9 @@ function ResearchContent() {
         </h2>
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="flex-1">
-            <label className="text-xs text-on-surface-variant mb-1 block">토픽</label>
+            <label className="text-xs text-on-surface-variant mb-1 block">
+              토픽
+            </label>
             <input
               type="text"
               value={topic}
@@ -103,7 +197,9 @@ function ResearchContent() {
             />
           </div>
           <div className="flex-1">
-            <label className="text-xs text-on-surface-variant mb-1 block">키워드</label>
+            <label className="text-xs text-on-surface-variant mb-1 block">
+              키워드
+            </label>
             <input
               type="text"
               value={keyword}
@@ -137,7 +233,7 @@ function ResearchContent() {
       </div>
 
       {/* Progress Bar */}
-      {(loading || progress > 0) && (
+      {(loading || (progress > 0 && progress < 100)) && (
         <div className="space-y-1">
           <div className="flex items-center justify-between text-xs text-on-surface-variant">
             <span>리서치 진행률</span>
@@ -156,13 +252,61 @@ function ResearchContent() {
       {loading && !hasResults && (
         <div className="space-y-4">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="bg-surface-container-lowest rounded-2xl p-5 border border-outline-variant animate-pulse">
+            <div
+              key={i}
+              className="bg-surface-container-lowest rounded-2xl p-5 border border-outline-variant animate-pulse"
+            >
               <div className="h-4 bg-surface-container rounded w-1/3 mb-3" />
               <div className="h-3 bg-surface-container rounded w-full mb-2" />
               <div className="h-3 bg-surface-container rounded w-2/3" />
             </div>
           ))}
         </div>
+      )}
+
+      {/* SEO 전략 */}
+      {seoStrategy && (
+        <section>
+          <h2 className="font-serif text-lg font-bold text-on-surface mb-4 flex items-center gap-2">
+            <Icon name="search" size={22} />
+            SEO 전략
+          </h2>
+          <div className="bg-surface-container-lowest rounded-2xl p-5 border border-outline-variant space-y-3">
+            <div>
+              <span className="text-xs text-on-surface-variant">주요 키워드:</span>
+              <span className="ml-2 text-sm font-medium text-on-surface">
+                {seoStrategy.primaryKeyword}
+              </span>
+            </div>
+            <div>
+              <span className="text-xs text-on-surface-variant">보조 키워드:</span>
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {seoStrategy.secondaryKeywords.map((kw) => (
+                  <span
+                    key={kw}
+                    className="bg-primary/10 text-primary text-xs rounded-full px-3 py-0.5"
+                  >
+                    {kw}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div>
+              <span className="text-xs text-on-surface-variant">검색 의도:</span>
+              <p className="text-sm text-on-surface mt-1">
+                {seoStrategy.searchIntent}
+              </p>
+            </div>
+            {seoStrategy.competitorAnalysis && (
+              <div>
+                <span className="text-xs text-on-surface-variant">경쟁 분석:</span>
+                <p className="text-sm text-on-surface mt-1">
+                  {seoStrategy.competitorAnalysis}
+                </p>
+              </div>
+            )}
+          </div>
+        </section>
       )}
 
       {/* 팩트 수집 */}
@@ -188,7 +332,9 @@ function ResearchContent() {
                     <Icon name={icon} size={20} />
                   </button>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-on-surface leading-relaxed">{fact.content}</p>
+                    <p className="text-sm text-on-surface leading-relaxed">
+                      {fact.content}
+                    </p>
                     <div className="flex items-center gap-2 mt-2 flex-wrap">
                       <span className="bg-surface-container text-on-surface-variant text-xs rounded-full px-3 py-0.5">
                         {fact.category}
@@ -227,10 +373,11 @@ function ResearchContent() {
                 className="bg-surface-container-lowest rounded-2xl border border-outline-variant overflow-hidden"
               >
                 <div className="px-5 py-3 border-b border-outline-variant">
-                  <h3 className="font-serif text-sm font-bold text-on-surface">{c.topic}</h3>
+                  <h3 className="font-serif text-sm font-bold text-on-surface">
+                    {c.topic}
+                  </h3>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-outline-variant">
-                  {/* 찬성 */}
                   <div className="p-4">
                     <p className="text-xs font-semibold text-green-600 mb-2 flex items-center gap-1">
                       <Icon name="thumb_up" size={14} />
@@ -238,14 +385,18 @@ function ResearchContent() {
                     </p>
                     <ul className="space-y-1.5">
                       {c.proArguments.map((arg, i) => (
-                        <li key={i} className="text-xs text-on-surface leading-relaxed flex items-start gap-1.5">
-                          <span className="text-green-500 mt-0.5 shrink-0">+</span>
+                        <li
+                          key={i}
+                          className="text-xs text-on-surface leading-relaxed flex items-start gap-1.5"
+                        >
+                          <span className="text-green-500 mt-0.5 shrink-0">
+                            +
+                          </span>
                           {arg}
                         </li>
                       ))}
                     </ul>
                   </div>
-                  {/* 반대 */}
                   <div className="p-4">
                     <p className="text-xs font-semibold text-red-500 mb-2 flex items-center gap-1">
                       <Icon name="thumb_down" size={14} />
@@ -253,8 +404,13 @@ function ResearchContent() {
                     </p>
                     <ul className="space-y-1.5">
                       {c.conArguments.map((arg, i) => (
-                        <li key={i} className="text-xs text-on-surface leading-relaxed flex items-start gap-1.5">
-                          <span className="text-red-400 mt-0.5 shrink-0">-</span>
+                        <li
+                          key={i}
+                          className="text-xs text-on-surface leading-relaxed flex items-start gap-1.5"
+                        >
+                          <span className="text-red-400 mt-0.5 shrink-0">
+                            -
+                          </span>
                           {arg}
                         </li>
                       ))}
@@ -289,20 +445,87 @@ function ResearchContent() {
                     {s.placement}
                   </span>
                 </div>
-                <p className="text-sm text-on-surface leading-relaxed">{s.description}</p>
+                <p className="text-sm text-on-surface leading-relaxed">
+                  {s.description}
+                </p>
               </div>
             ))}
           </div>
         </section>
       )}
 
+      {/* 글쓰기 가이드 */}
+      {writingGuide && (
+        <section>
+          <h2 className="font-serif text-lg font-bold text-on-surface mb-4 flex items-center gap-2">
+            <Icon name="description" size={22} />
+            글쓰기 가이드
+          </h2>
+          <div className="bg-surface-container-lowest rounded-2xl p-5 border border-outline-variant">
+            <p className="text-sm text-on-surface leading-relaxed whitespace-pre-wrap">
+              {writingGuide}
+            </p>
+          </div>
+        </section>
+      )}
+
+      {/* 확인 / 글쓰기 진행 */}
+      {hasResults && !loading && (
+        <div className="bg-surface-container-lowest rounded-2xl p-6 border border-outline-variant text-center space-y-4">
+          {!confirmed ? (
+            <>
+              <h3 className="font-serif text-lg font-bold text-on-surface">
+                리서치 결과를 확인해주세요
+              </h3>
+              <p className="text-sm text-on-surface-variant">
+                확인 후 글쓰기를 진행할 수 있습니다.
+              </p>
+              <div className="flex items-center justify-center gap-3">
+                <button
+                  onClick={handleConfirm}
+                  className="flex items-center gap-2 bg-primary text-on-primary font-semibold rounded-xl px-6 py-3 text-sm cursor-pointer"
+                >
+                  <Icon name="check" size={18} />
+                  확인하고 글쓰기 진행
+                </button>
+                <button
+                  onClick={handleStartResearch}
+                  className="flex items-center gap-2 bg-surface-container text-on-surface rounded-xl px-6 py-3 text-sm cursor-pointer"
+                >
+                  <Icon name="refresh" size={18} />
+                  다시 리서치
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center justify-center gap-2 text-primary">
+                <Icon name="check_circle" size={24} />
+                <span className="font-medium">리서치가 확인되었습니다</span>
+              </div>
+              {topicId && (
+                <button
+                  onClick={handleProceedToWrite}
+                  className="flex items-center gap-2 bg-primary text-on-primary font-semibold rounded-xl px-6 py-3 text-sm cursor-pointer mx-auto"
+                >
+                  <Icon name="edit_document" size={18} />
+                  글쓰기로 이동
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
       {/* Empty state */}
       {!loading && !hasResults && progress === 0 && (
         <div className="flex flex-col items-center justify-center py-16 text-on-surface-variant">
           <Icon name="science" size={48} className="opacity-40 mb-4" />
-          <p className="text-sm">토픽과 키워드를 입력하고 리서치를 시작하세요</p>
+          <p className="text-sm">
+            토픽과 키워드를 입력하고 리서치를 시작하세요
+          </p>
           <p className="text-xs mt-1 opacity-60">
-            AI가 팩트, 논쟁 포인트, 경험 블록을 자동으로 수집합니다
+            AI가 웹 검색, SEO 전략, 글쓰기 가이드를 자동으로 생성합니다
           </p>
         </div>
       )}
@@ -313,7 +536,14 @@ function ResearchContent() {
 export default function ResearchPage() {
   return (
     <AppShell title="딥 리서치">
-      <Suspense fallback={<div className="max-w-5xl mx-auto animate-pulse p-6"><div className="h-8 bg-surface-container rounded w-1/3 mb-4" /><div className="h-32 bg-surface-container rounded-2xl" /></div>}>
+      <Suspense
+        fallback={
+          <div className="max-w-5xl mx-auto animate-pulse p-6">
+            <div className="h-8 bg-surface-container rounded w-1/3 mb-4" />
+            <div className="h-32 bg-surface-container rounded-2xl" />
+          </div>
+        }
+      >
         <ResearchContent />
       </Suspense>
     </AppShell>

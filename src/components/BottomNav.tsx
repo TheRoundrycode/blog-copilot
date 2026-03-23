@@ -7,9 +7,9 @@ import Icon from './Icon';
 const bottomNavItems = [
   { label: '대시보드', icon: 'dashboard', href: '/dashboard' },
   { label: '토픽', icon: 'lightbulb', href: '/topics' },
-  { label: '에디터', icon: 'edit_document', href: '/editor' },
+  { label: '글쓰기', icon: 'edit_document', href: '/write' },
   { label: '클러스터', icon: 'hub', href: '/cluster-map' },
-  { label: 'AI채팅', icon: 'chat', href: '#chat' },
+  { label: 'AI채팅', icon: 'chat', href: '/chat' },
 ];
 
 interface BottomNavProps {

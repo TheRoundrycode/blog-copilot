@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import AppShell from '@/components/AppShell';
 import Icon from '@/components/Icon';
-import { getClusters, getRecentArticles } from '@/lib/store';
-import type { Cluster } from '@/lib/types';
+import { getClusters, getArticles, isOnboardingComplete } from '@/lib/store';
+import type { Cluster, Article } from '@/lib/types';
 
 // Generate sub-article nodes around a cluster node
 function getArticlePositions(cx: number, cy: number, count: number, radius: number) {
@@ -20,14 +21,66 @@ function getArticlePositions(cx: number, cy: number, count: number, radius: numb
 }
 
 export default function ClusterMapPage() {
-  const clusters = getClusters();
-  const articles = getRecentArticles();
+  const router = useRouter();
+  const [mounted, setMounted] = useState(false);
+  const [clusters, setClusters] = useState<Cluster[]>([]);
+  const [articles, setArticles] = useState<Article[]>([]);
   const [selectedCluster, setSelectedCluster] = useState<Cluster | null>(null);
+
+  useEffect(() => {
+    if (!isOnboardingComplete()) {
+      router.replace('/onboarding');
+      return;
+    }
+    setClusters(getClusters());
+    setArticles(getArticles());
+    setMounted(true);
+  }, [router]);
 
   const totalArticles = useMemo(
     () => clusters.reduce((sum, c) => sum + c.article_count, 0),
     [clusters]
   );
+
+  // Articles belonging to the selected cluster
+  const clusterArticles = useMemo(() => {
+    if (!selectedCluster) return [];
+    return articles.filter((a) => a.cluster_id === selectedCluster.id);
+  }, [selectedCluster, articles]);
+
+  if (!mounted) {
+    return (
+      <AppShell title="클러스터 맵">
+        <div className="flex items-center justify-center h-64">
+          <span className="material-symbols-outlined animate-spin text-primary" style={{ fontSize: 32 }}>
+            progress_activity
+          </span>
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (clusters.length === 0) {
+    return (
+      <AppShell title="클러스터 맵">
+        <div className="max-w-lg mx-auto text-center py-20 space-y-4">
+          <span className="material-symbols-outlined text-on-surface-variant" style={{ fontSize: 48 }}>
+            hub
+          </span>
+          <h2 className="text-xl font-bold text-on-surface">클러스터가 없습니다</h2>
+          <p className="text-sm text-on-surface-variant">
+            온보딩에서 블로그를 등록하면 클러스터 맵이 생성됩니다.
+          </p>
+          <button
+            onClick={() => router.push('/onboarding')}
+            className="bg-primary text-on-primary rounded-xl px-6 py-2.5 text-sm font-medium cursor-pointer"
+          >
+            블로그 등록하기
+          </button>
+        </div>
+      </AppShell>
+    );
+  }
 
   // SVG layout constants
   const viewW = 800;
@@ -49,12 +102,6 @@ export default function ClusterMapPage() {
       cy: hubY + orbitRadius * Math.sin(angle),
     };
   });
-
-  // Articles belonging to the selected cluster
-  const clusterArticles = useMemo(() => {
-    if (!selectedCluster) return [];
-    return articles.filter((a) => a.cluster_id === selectedCluster.id);
-  }, [selectedCluster, articles]);
 
   return (
     <AppShell title="클러스터 맵">
@@ -251,7 +298,7 @@ export default function ClusterMapPage() {
                     ))
                   ) : (
                     <p className="text-xs text-on-surface-variant">
-                      이 클러스터의 세부 글 데이터가 아직 로드되지 않았습니다.
+                      이 클러스터에 속한 글 목록입니다.
                     </p>
                   )}
                 </div>
@@ -271,7 +318,7 @@ export default function ClusterMapPage() {
               <h3 className="font-serif text-base font-bold text-on-surface mb-4">클러스터 밸런스</h3>
               <div className="space-y-3">
                 {clusters.map((c) => {
-                  const pct = Math.round((c.article_count / totalArticles) * 100);
+                  const pct = totalArticles > 0 ? Math.round((c.article_count / totalArticles) * 100) : 0;
                   const idealMin = Math.round(100 / clusters.length) - 5;
                   const idealMax = Math.round(100 / clusters.length) + 5;
                   const isInRange = pct >= idealMin && pct <= idealMax;
@@ -316,32 +363,6 @@ export default function ClusterMapPage() {
               <p className="text-xs text-on-surface-variant mt-3">
                 점선 구간이 권장 비율 범위입니다.
               </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Strategic Pivot Card */}
-        <div className="bg-secondary/10 border border-secondary/30 rounded-2xl p-5">
-          <div className="flex items-start gap-3">
-            <span className="material-symbols-outlined text-secondary text-2xl mt-0.5">
-              strategy
-            </span>
-            <div>
-              <h3 className="font-serif text-base font-bold text-on-surface mb-1">전략적 피벗 카드</h3>
-              <p className="text-sm text-on-surface-variant leading-relaxed">
-                <strong className="text-on-surface">이 클러스터를 강화하세요:</strong>{' '}
-                &ldquo;메타 경험기&rdquo; 클러스터의 글 수가 상대적으로 적고 평균 순위가 낮습니다.
-                경험 기반 콘텐츠를 2~3편 추가하면 클러스터 권위가 크게 상승할 수 있습니다.
-                &ldquo;1인 창업&rdquo; 클러스터도 하락세이므로 실전 사례 중심의 글을 보강해 보세요.
-              </p>
-              <div className="flex flex-wrap gap-2 mt-3">
-                <span className="bg-secondary/20 text-on-surface text-xs font-medium px-3 py-1 rounded-full">
-                  메타 경험기 +3편 권장
-                </span>
-                <span className="bg-secondary/20 text-on-surface text-xs font-medium px-3 py-1 rounded-full">
-                  1인 창업 트렌드 반등 가능
-                </span>
-              </div>
             </div>
           </div>
         </div>

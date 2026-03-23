@@ -1,131 +1,442 @@
-// 로컬 데이터 스토어 (Supabase 연동 전 임시 사용)
-// Supabase 설정 완료 후 이 파일의 함수들을 Supabase 쿼리로 교체
+// localStorage 기반 데이터 스토어
+// Supabase로 교체 가능하도록 동일한 인터페이스 유지
 
 import type {
-  DashboardMetrics,
-  ClusterPerformance,
-  CannibalizationWarning,
+  UserProfile,
+  Conversation,
+  ConversationMessage,
+  UserLearningData,
+  Blog,
   Cluster,
   Article,
   TopicRecommendation,
+  Research,
+  CrawledArticle,
+  DashboardMetrics,
+  ClusterPerformance,
+  CannibalizationWarning,
 } from "./types";
 
-// 대시보드 메트릭스
+// ===== localStorage 키 =====
+const KEYS = {
+  USER_PROFILE: "bc_user_profile",
+  CONVERSATIONS: "bc_conversations",
+  CRAWLED_CONTENT: "bc_crawled_content",
+  LEARNING_DATA: "bc_learning_data",
+  BLOG: "bc_blog",
+  CLUSTERS: "bc_clusters",
+  ARTICLES: "bc_articles",
+  TOPICS: "bc_topics",
+  RESEARCH: "bc_research",
+} as const;
+
+// ===== 헬퍼 =====
+function getItem<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function setItem<T>(key: string, value: T): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
+// ===== ID 생성 =====
+export function generateId(): string {
+  return `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+// ===== 사용자 프로필 =====
+export function getUserProfile(): UserProfile | null {
+  return getItem<UserProfile | null>(KEYS.USER_PROFILE, null);
+}
+
+export function saveUserProfile(profile: UserProfile): void {
+  setItem(KEYS.USER_PROFILE, profile);
+}
+
+export function isOnboardingComplete(): boolean {
+  const profile = getUserProfile();
+  return !!profile?.onboardingCompletedAt;
+}
+
+// ===== 대화 =====
+export function getConversations(): Conversation[] {
+  return getItem<Conversation[]>(KEYS.CONVERSATIONS, []);
+}
+
+export function getConversation(id: string): Conversation | undefined {
+  return getConversations().find((c) => c.id === id);
+}
+
+export function getConversationByType(
+  type: Conversation["type"]
+): Conversation | undefined {
+  return getConversations().find((c) => c.type === type);
+}
+
+export function saveConversation(conversation: Conversation): void {
+  const all = getConversations();
+  const idx = all.findIndex((c) => c.id === conversation.id);
+  if (idx !== -1) {
+    all[idx] = conversation;
+  } else {
+    all.push(conversation);
+  }
+  // 최대 50개 대화 유지
+  const trimmed = all.slice(-50);
+  setItem(KEYS.CONVERSATIONS, trimmed);
+}
+
+export function addMessageToConversation(
+  conversationId: string,
+  message: ConversationMessage
+): void {
+  const conv = getConversation(conversationId);
+  if (!conv) return;
+  conv.messages.push(message);
+  conv.updatedAt = new Date().toISOString();
+  saveConversation(conv);
+}
+
+// ===== 크롤링 콘텐츠 =====
+export function getCrawledContent(): CrawledArticle[] {
+  return getItem<CrawledArticle[]>(KEYS.CRAWLED_CONTENT, []);
+}
+
+export function saveCrawledContent(articles: CrawledArticle[]): void {
+  setItem(KEYS.CRAWLED_CONTENT, articles);
+}
+
+// ===== 사용자 학습 데이터 =====
+export function getLearningData(): UserLearningData {
+  return getItem<UserLearningData>(KEYS.LEARNING_DATA, {
+    id: "default",
+    writingStyle: [],
+    preferredTopicTypes: [],
+    avoidPatterns: [],
+    selectedTopics: [],
+    rejectedTopics: [],
+    feedbacks: [],
+    insightSummary: "",
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export function updateLearningData(
+  updates: Partial<UserLearningData>
+): void {
+  const current = getLearningData();
+  setItem(KEYS.LEARNING_DATA, {
+    ...current,
+    ...updates,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export function addTopicSelection(topicId: string, keyword: string): void {
+  const data = getLearningData();
+  data.selectedTopics.push({
+    topicId,
+    keyword,
+    date: new Date().toISOString(),
+  });
+  updateLearningData({ selectedTopics: data.selectedTopics });
+}
+
+export function addTopicRejection(
+  topicId: string,
+  keyword: string,
+  reason?: string
+): void {
+  const data = getLearningData();
+  data.rejectedTopics.push({
+    topicId,
+    keyword,
+    reason,
+    date: new Date().toISOString(),
+  });
+  updateLearningData({ rejectedTopics: data.rejectedTopics });
+}
+
+export function addFeedback(context: string, feedback: string): void {
+  const data = getLearningData();
+  data.feedbacks.push({
+    context,
+    feedback,
+    date: new Date().toISOString(),
+  });
+  // 최근 100개만 유지
+  const trimmed = data.feedbacks.slice(-100);
+  updateLearningData({ feedbacks: trimmed });
+}
+
+export function updateInsightSummary(summary: string): void {
+  updateLearningData({ insightSummary: summary });
+}
+
+// ===== 블로그 =====
+export function getBlog(): Blog | null {
+  return getItem<Blog | null>(KEYS.BLOG, null);
+}
+
+export function saveBlog(blog: Blog): void {
+  setItem(KEYS.BLOG, blog);
+}
+
+// ===== 클러스터 =====
+export function getClusters(): Cluster[] {
+  return getItem<Cluster[]>(KEYS.CLUSTERS, []);
+}
+
+export function saveClusters(clusters: Cluster[]): void {
+  setItem(KEYS.CLUSTERS, clusters);
+}
+
+export function updateCluster(id: string, updates: Partial<Cluster>): void {
+  const clusters = getClusters();
+  const idx = clusters.findIndex((c) => c.id === id);
+  if (idx !== -1) {
+    clusters[idx] = { ...clusters[idx], ...updates };
+    saveClusters(clusters);
+  }
+}
+
+// ===== 아티클 =====
+export function getArticles(): Article[] {
+  return getItem<Article[]>(KEYS.ARTICLES, []);
+}
+
+export function getArticleById(id: string): Article | undefined {
+  return getArticles().find((a) => a.id === id);
+}
+
+export function getArticlesByCluster(clusterId: string): Article[] {
+  return getArticles().filter((a) => a.cluster_id === clusterId);
+}
+
+export function saveArticle(article: Article): void {
+  const articles = getArticles();
+  const idx = articles.findIndex((a) => a.id === article.id);
+  if (idx !== -1) {
+    articles[idx] = article;
+  } else {
+    articles.push(article);
+  }
+  setItem(KEYS.ARTICLES, articles);
+}
+
+export function saveArticles(articles: Article[]): void {
+  setItem(KEYS.ARTICLES, articles);
+}
+
+export function deleteArticle(id: string): void {
+  const articles = getArticles().filter((a) => a.id !== id);
+  setItem(KEYS.ARTICLES, articles);
+}
+
+export function getRecentArticles(limit: number = 10): Article[] {
+  return getArticles()
+    .sort(
+      (a, b) =>
+        new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+    )
+    .slice(0, limit);
+}
+
+// 내부링크용: 전체 기사 목록 (URL + 제목 + 키워드)
+export function getArticlesForInternalLinking(): {
+  id: string;
+  url: string;
+  title: string;
+  keyword: string;
+  clusterId: string;
+}[] {
+  return getArticles().map((a) => ({
+    id: a.id,
+    url: a.url,
+    title: a.title,
+    keyword: a.target_keyword || "",
+    clusterId: a.cluster_id || "",
+  }));
+}
+
+// 관련 기사 조회 (같은 클러스터 또는 유사 키워드)
+export function getRelatedArticles(
+  clusterId?: string,
+  keyword?: string
+): Article[] {
+  const articles = getArticles();
+  return articles.filter((a) => {
+    if (clusterId && a.cluster_id === clusterId) return true;
+    if (
+      keyword &&
+      a.target_keyword &&
+      a.target_keyword.toLowerCase().includes(keyword.toLowerCase())
+    )
+      return true;
+    return false;
+  });
+}
+
+// ===== 토픽 추천 =====
+export function getTopics(): TopicRecommendation[] {
+  return getItem<TopicRecommendation[]>(KEYS.TOPICS, []);
+}
+
+export function getTopicById(id: string): TopicRecommendation | undefined {
+  return getTopics().find((t) => t.id === id);
+}
+
+export function saveTopics(topics: TopicRecommendation[]): void {
+  setItem(KEYS.TOPICS, topics);
+}
+
+export function addTopics(newTopics: TopicRecommendation[]): void {
+  const existing = getTopics();
+  const merged = [
+    ...existing,
+    ...newTopics.filter((t) => !existing.some((e) => e.id === t.id)),
+  ];
+  saveTopics(merged);
+}
+
+export function updateTopicStatus(
+  id: string,
+  status: TopicRecommendation["status"]
+): void {
+  const topics = getTopics();
+  const idx = topics.findIndex((t) => t.id === id);
+  if (idx !== -1) {
+    topics[idx] = { ...topics[idx], status };
+    saveTopics(topics);
+  }
+}
+
+// ===== 리서치 =====
+export function getResearchList(): Research[] {
+  return getItem<Research[]>(KEYS.RESEARCH, []);
+}
+
+export function getResearchByTopicId(topicId: string): Research | null {
+  return getResearchList().find((r) => r.topicId === topicId) ?? null;
+}
+
+export function saveResearch(research: Research): void {
+  const all = getResearchList();
+  const idx = all.findIndex((r) => r.id === research.id);
+  if (idx !== -1) {
+    all[idx] = research;
+  } else {
+    all.push(research);
+  }
+  setItem(KEYS.RESEARCH, all);
+}
+
+// ===== 대시보드 메트릭스 (실제 데이터에서 계산) =====
 export function getDashboardMetrics(): DashboardMetrics {
+  const articles = getArticles();
+  const clusters = getClusters();
+  const totalArticles = articles.length;
+  const publishedArticles = articles.filter(
+    (a) => a.status === "published"
+  ).length;
+  const totalClicks = clusters.reduce(
+    (sum, c) => sum + (c.total_clicks ?? 0),
+    0
+  );
+  const totalImpressions = clusters.reduce(
+    (sum, c) => sum + (c.total_impressions ?? 0),
+    0
+  );
+  const avgPosition =
+    clusters.length > 0
+      ? clusters.reduce((sum, c) => sum + (c.avg_position ?? 0), 0) /
+        clusters.length
+      : 0;
+
   return {
-    totalClicks: 12847,
-    clicksChange: 12.5,
-    avgPosition: 14.2,
-    positionChange: -2.3,
-    totalImpressions: 284930,
-    impressionsChange: 8.7,
-    totalArticles: 47,
-    articlesChange: 4,
+    totalClicks,
+    clicksChange: 0,
+    avgPosition: Math.round(avgPosition * 10) / 10,
+    positionChange: 0,
+    totalImpressions,
+    impressionsChange: 0,
+    totalArticles: publishedArticles || totalArticles,
+    articlesChange: 0,
   };
 }
 
-// 클러스터 성과
+// ===== 클러스터 성과 =====
 export function getClusterPerformances(): ClusterPerformance[] {
-  return [
-    { name: "바이브코딩", color: "#414937", articles: 12, avgPosition: 8.3, clicks: 4521, impressions: 89400, trend: "up" },
-    { name: "AI 도구 리뷰", color: "#0058be", articles: 9, avgPosition: 12.1, clicks: 3210, impressions: 67200, trend: "up" },
-    { name: "디지털 마케팅", color: "#7c5e3c", articles: 8, avgPosition: 18.7, clicks: 2180, impressions: 52100, trend: "stable" },
-    { name: "1인 창업", color: "#6b4c8a", articles: 10, avgPosition: 15.4, clicks: 1890, impressions: 41200, trend: "down" },
-    { name: "메타 경험기", color: "#c45a3c", articles: 8, avgPosition: 22.1, clicks: 1046, impressions: 35030, trend: "stable" },
-  ];
+  const clusters = getClusters();
+  const articles = getArticles();
+
+  return clusters.map((c) => ({
+    name: c.name,
+    color: c.color,
+    articles:
+      articles.filter((a) => a.cluster_id === c.id).length || c.article_count,
+    avgPosition: c.avg_position ?? 0,
+    clicks: c.total_clicks ?? 0,
+    impressions: c.total_impressions ?? 0,
+    trend: "stable" as const,
+  }));
 }
 
-// 카니발리제이션 경고
+// ===== 카니발리제이션 감지 =====
 export function getCannibalizationWarnings(): CannibalizationWarning[] {
-  return [
-    {
-      keyword: "바이브코딩 시작하기",
-      articles: [
-        { title: "바이브코딩 입문 가이드", url: "/vibe-coding-guide", position: 12 },
-        { title: "바이브코딩으로 첫 프로젝트 만들기", url: "/vibe-coding-first", position: 15 },
-      ],
-      severity: "high",
-    },
-    {
-      keyword: "AI 블로그 도구",
-      articles: [
-        { title: "AI 글쓰기 도구 비교", url: "/ai-writing-tools", position: 8 },
-        { title: "블로그 AI 도구 추천", url: "/blog-ai-tools", position: 11 },
-      ],
-      severity: "medium",
-    },
-  ];
+  const articles = getArticles();
+  const keywordMap = new Map<string, Article[]>();
+
+  for (const article of articles) {
+    if (article.target_keyword) {
+      const key = article.target_keyword.toLowerCase();
+      if (!keywordMap.has(key)) keywordMap.set(key, []);
+      keywordMap.get(key)!.push(article);
+    }
+  }
+
+  const warnings: CannibalizationWarning[] = [];
+  for (const [keyword, arts] of keywordMap) {
+    if (arts.length >= 2) {
+      warnings.push({
+        keyword,
+        articles: arts.map((a) => ({ title: a.title, url: a.url, position: 0 })),
+        severity: arts.length >= 3 ? "high" : "medium",
+      });
+    }
+  }
+  return warnings;
 }
 
-// 검색 유입 키워드 TOP 5
-export function getTopSearchTerms(): { term: string; clicks: number; position: number; change: number }[] {
-  return [
-    { term: "바이브코딩", clicks: 1247, position: 3.2, change: 1.5 },
-    { term: "AI 블로그 작성", clicks: 892, position: 5.1, change: -0.8 },
-    { term: "GPT 활용법", clicks: 756, position: 7.3, change: 2.1 },
-    { term: "1인 창업 블로그", clicks: 634, position: 9.8, change: -1.2 },
-    { term: "SEO 최적화 방법", clicks: 521, position: 11.4, change: 0.5 },
-  ];
+// ===== 검색 유입 (GSC 연동 전까지 빈 배열) =====
+export function getTopSearchTerms(): {
+  term: string;
+  clicks: number;
+  position: number;
+  change: number;
+}[] {
+  return [];
 }
 
-// 클러스터 목록
-export function getClusters(): Cluster[] {
-  return [
-    { id: "c1", blog_id: "b1", name: "바이브코딩", color: "#414937", article_count: 12, avg_position: 8.3, total_clicks: 4521, total_impressions: 89400 },
-    { id: "c2", blog_id: "b1", name: "AI 도구 리뷰", color: "#0058be", article_count: 9, avg_position: 12.1, total_clicks: 3210, total_impressions: 67200 },
-    { id: "c3", blog_id: "b1", name: "디지털 마케팅", color: "#7c5e3c", article_count: 8, avg_position: 18.7, total_clicks: 2180, total_impressions: 52100 },
-    { id: "c4", blog_id: "b1", name: "1인 창업", color: "#6b4c8a", article_count: 10, avg_position: 15.4, total_clicks: 1890, total_impressions: 41200 },
-    { id: "c5", blog_id: "b1", name: "메타 경험기", color: "#c45a3c", article_count: 8, avg_position: 22.1, total_clicks: 1046, total_impressions: 35030 },
-  ];
+// ===== 성장 데이터 (GSC 연동 전까지 빈 배열) =====
+export function getGrowthData(): {
+  month: string;
+  clicks: number;
+  impressions: number;
+}[] {
+  return [];
 }
 
-// 최근 글 목록
-export function getRecentArticles(): Article[] {
-  return [
-    { id: "a1", blog_id: "b1", cluster_id: "c1", title: "바이브코딩으로 SaaS 만들기 완전 가이드", url: "/vibe-coding-saas", status: "published", target_keyword: "바이브코딩 SaaS", word_count: 3200, seo_score: 92, created_at: "2025-03-15", updated_at: "2025-03-15" },
-    { id: "a2", blog_id: "b1", cluster_id: "c2", title: "2025년 AI 글쓰기 도구 TOP 10 비교", url: "/ai-writing-tools-2025", status: "published", target_keyword: "AI 글쓰기 도구", word_count: 4100, seo_score: 88, created_at: "2025-03-10", updated_at: "2025-03-12" },
-    { id: "a3", blog_id: "b1", cluster_id: "c1", title: "Cursor vs Windsurf: 바이브코딩 에디터 비교", url: "/cursor-vs-windsurf", status: "draft", target_keyword: "Cursor Windsurf 비교", word_count: 2800, seo_score: 75, created_at: "2025-03-08", updated_at: "2025-03-08" },
-  ];
-}
-
-// 월별 성장 차트 데이터
-export function getGrowthData(): { month: string; clicks: number; impressions: number }[] {
-  return [
-    { month: "10월", clicks: 5200, impressions: 120000 },
-    { month: "11월", clicks: 6800, impressions: 156000 },
-    { month: "12월", clicks: 8100, impressions: 189000 },
-    { month: "1월", clicks: 9400, impressions: 215000 },
-    { month: "2월", clicks: 11200, impressions: 251000 },
-    { month: "3월", clicks: 12847, impressions: 284930 },
-  ];
-}
-
-// 토픽 추천 (초기 더미 데이터, GPT가 대체)
-export function getInitialTopics(): TopicRecommendation[] {
-  return [
-    {
-      id: "t1",
-      title: "바이브코딩으로 MVP 3일 만에 만드는 법",
-      keyword: "바이브코딩 MVP",
-      searchVolume: 2400,
-      difficulty: "보통",
-      cluster: "바이브코딩",
-      priority: 1,
-      reasoning: "기존 바이브코딩 클러스터를 강화하면서 실전 가이드 수요를 충족할 수 있습니다.",
-      lsiKeywords: ["노코드 MVP", "빠른 프로토타입", "AI 개발"],
-      viralScore: 85,
-    },
-    {
-      id: "t2",
-      title: "ChatGPT vs Claude: 블로그 글쓰기 실전 비교",
-      keyword: "ChatGPT Claude 비교",
-      searchVolume: 5100,
-      difficulty: "어려움",
-      cluster: "AI 도구 리뷰",
-      priority: 1,
-      reasoning: "높은 검색량의 비교 키워드로, AI 도구 리뷰 클러스터의 허브 글이 될 수 있습니다.",
-      lsiKeywords: ["AI 글쓰기", "LLM 비교", "블로그 자동화"],
-      viralScore: 92,
-    },
-  ];
+// ===== 전체 데이터 초기화 =====
+export function clearAllData(): void {
+  Object.values(KEYS).forEach((key) => {
+    if (typeof window !== "undefined") localStorage.removeItem(key);
+  });
 }

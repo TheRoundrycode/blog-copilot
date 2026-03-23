@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { streamChat, SYSTEM_PROMPTS } from "@/lib/openai";
+import { streamChat, getChatPrompt } from "@/lib/openai";
 
 export async function POST(request: Request) {
   try {
-    const { messages, context } = await request.json();
+    const { messages, profile, crawledContent, learningData } =
+      await request.json();
 
     if (!messages || !Array.isArray(messages)) {
       return NextResponse.json(
@@ -12,10 +13,11 @@ export async function POST(request: Request) {
       );
     }
 
-    let systemPrompt = SYSTEM_PROMPTS.blogCopilot;
-    if (context) {
-      systemPrompt += `\n\n블로그 컨텍스트:\n${context}`;
-    }
+    const systemPrompt = getChatPrompt(
+      profile || null,
+      crawledContent || [],
+      learningData
+    );
 
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
@@ -35,7 +37,12 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Chat API error:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "채팅 처리 중 오류가 발생했습니다." },
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "채팅 처리 중 오류가 발생했습니다.",
+      },
       { status: 500 }
     );
   }

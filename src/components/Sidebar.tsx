@@ -6,11 +6,11 @@ import Icon from './Icon';
 
 const navItems = [
   { label: '대시보드', icon: 'dashboard', href: '/dashboard' },
-  { label: '토픽 선택', icon: 'lightbulb', href: '/topics' },
+  { label: '토픽 추천', icon: 'lightbulb', href: '/topics' },
   { label: '딥 리서치', icon: 'science', href: '/research' },
-  { label: '아웃라인', icon: 'account_tree', href: '/outline' },
-  { label: '에디터', icon: 'edit_document', href: '/editor' },
+  { label: '글쓰기', icon: 'edit_document', href: '/write' },
   { label: '클러스터 맵', icon: 'hub', href: '/cluster-map' },
+  { label: 'AI 채팅', icon: 'chat', href: '/chat' },
 ];
 
 interface SidebarProps {
@@ -51,16 +51,8 @@ export default function Sidebar({ onOpenChat }: SidebarProps) {
         })}
       </nav>
 
-      {/* AI Chat Button */}
-      <div className="px-3 pb-5">
-        <button
-          onClick={onOpenChat}
-          className="flex items-center gap-3 w-full px-4 py-3 text-sm font-medium rounded-xl text-on-surface-variant hover:bg-surface-container-high transition-colors cursor-pointer"
-        >
-          <Icon name="chat" size={22} />
-          <span>AI 채팅</span>
-        </button>
-      </div>
+      {/* Footer */}
+      <div className="px-3 pb-5" />
     </aside>
   );
 }
